@@ -155,15 +155,17 @@ class Flexible extends Field
             return $this;
         }
 
+        if($count === 6) {
+            $this->registerLayout(new Layout($arguments[0], $arguments[1], $arguments[2], $arguments[3], $arguments[4], $arguments[5]));
+            return $this;
+        }
+
         if($count !== 1) {
             throw new \Exception('Invalid "addLayout" method call. Expected 1 or 3 arguments, ' . $count . ' given.');
         }
 
         $layout = $arguments[0];
-
-        if(!($layout instanceof LayoutInterface)) {
-            $layout = new $layout();
-        }
+        $layout = new $layout();
 
         if(!($layout instanceof LayoutInterface)) {
             throw new \Exception('Layout Class "' . get_class($layout) . '" does not implement LayoutInterface.');
@@ -230,22 +232,6 @@ class Flexible extends Field
     }
 
     /**
-     * Resolve the field's value for display on index and detail views.
-     *
-     * @param mixed $resource
-     * @param string|null $attribute
-     * @return void
-     */
-    public function resolveForDisplay($resource, $attribute = null)
-    {
-        $attribute = $attribute ?? $this->attribute;
-
-        $this->buildGroups($resource, $attribute);
-
-        $this->value = $this->resolveGroupsForDisplay($this->groups);
-    }
-
-    /**
      * Hydrate the given attribute on the model based on the incoming request.
      *
      * @param  \Laravel\Nova\Http\Requests\NovaRequest  $request
@@ -293,7 +279,7 @@ class Flexible extends Field
 
         $callbacks = [];
 
-        $this->groups = collect($raw)->map(function($item, $key) use ($request, &$callbacks) {
+        $new_groups  = collect($raw)->map(function($item, $key) use ($request, &$callbacks) {
             $layout = $item['layout'];
             $key = $item['key'];
             $attributes = $item['attributes'];
@@ -308,9 +294,30 @@ class Flexible extends Field
             return $group;
         });
 
+        $this->fireRemoveCallbacks($new_groups);
+
+        $this->groups = $new_groups;
+
         return $callbacks;
     }
 
+    /**
+     * Fire's the remove callbacks on the layouts
+     *
+     * @param $new_groups This should be (all) the new groups to bne compared against to find the removed groups
+     */
+    protected function fireRemoveCallbacks($new_groups) {
+        $new_group_keys = $new_groups->map(function($item) {
+            return $item->inUseKey();
+        });
+        $removed_groups = $this->groups->filter(function ($item) use ($new_group_keys) {
+            return !$new_group_keys->contains($item->inUseKey());
+        })->each(function ($group) {
+            if (method_exists($group, 'fireRemoveCallback')) {
+                $group->fireRemoveCallback($this);
+            }
+        });
+    }
     /**
      * Find the flexible's value in given request
      *
@@ -341,20 +348,6 @@ class Flexible extends Field
     {
         return $groups->map(function($group) {
             return $group->getResolved();
-        });
-    }
-
-    /**
-     * Resolve all contained groups and their fields for display on index and
-     * detail views.
-     *
-     * @param Illuminate\Support\Collection $groups
-     * @return Illuminate\Support\Collection
-     */
-    protected function resolveGroupsForDisplay($groups)
-    {
-        return $groups->map(function ($group) {
-            return $group->getResolvedForDisplay();
         });
     }
 
@@ -466,7 +459,7 @@ class Flexible extends Field
             // reference (see Http\TransformsFlexibleErrors).
             static::registerValidationKeys($rules);
 
-            // Then, transform the rules into an array that's actually
+            // Then, transform the rules into an array that's actually 
             // usable by Laravel's Validator.
             $rules = $this->getCleanedRules($rules);
         }
